@@ -111,7 +111,7 @@ class FaceExtractor:
 def main():
     inference_device = 'cuda:0'
     image_size = 256
-    video_device = 1
+    video_device = 0
 
     cascPath      = str(Path(args.cascPath).absolute())
     video_capture = cv2.VideoCapture(video_device)
@@ -131,10 +131,13 @@ def main():
             if frame is not None:
                 face, (x, y, w, h) = faceExtractor.get_face(frame)
 
+
+
                 if face is not None:
                     t1 = time.time()
                     face  = cv2.cvtColor(face , cv2.COLOR_BGR2RGB)
                     face  = cv2.resize(face, (image_size, image_size))
+
 
                     (val, ar, expr, expressions) = emotionDetector.get_emotions(face)
                     t2 = time.time()
@@ -161,6 +164,11 @@ def main():
                     t3 = time.time()
 
                     print(f"fps: {1/(t3-t0):02f} cv: {t1-t0:02f} | emonet: {t2-t1:02f} | zmq: {t3-t2:02f}")
+
+
+                    # cv2.imshow('face', face)
+                    # if cv2.waitKey(25) & 0xFF == ord('q'):
+                    #     break
 
             else:
                 print(f"No camera frame!")
