@@ -92,10 +92,6 @@ class FaceExtractor:
 
     def __init__(self, cascPath):
         self.faceCascade   = cv2.CascadeClassifier(cascPath)
-        self.frame  = None
-        self.thread = None
-        self.face   = None
-        self.box    = (0.0, 0.0, 0.0, 0.0)
 
     def ready(self):
         pass
@@ -103,13 +99,11 @@ class FaceExtractor:
     def get_face(self, frame):
         self.frame = frame
 
-        if(self.thread is None or not self.thread.is_alive()):
-            thread = Thread(target=self.get_face_thread)
-            thread.start()
+        self._get_face()
 
         return self.face, self.box
     
-    def get_face_thread(self):
+    def _get_face(self):
         frame = self.frame
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self.faceCascade.detectMultiScale(
