@@ -1,7 +1,7 @@
 import numpy as np
 from pathlib import Path
 import argparse
-
+from threading import Thread
 import cv2
 
 import zmq
@@ -16,7 +16,7 @@ _expressions = {0: 'neutral', 1:'happy', 2:'sad', 3:'surprise', 4:'fear', 5:'dis
 parser = argparse.ArgumentParser()
 parser.add_argument('--nclasses', type=int, default=8, choices=[5,8], help='Number of emotional classes to test the model on. Please use 5 or 8.')
 parser.add_argument('--cascPath', default="haarcascade_frontalface_default.xml")
-
+parser.add_argument('--device'  , type=int, default=0)
 parser.add_argument('--subIp'   , default="127.0.0.1")
 parser.add_argument('--subPort' , default=8104)
 
@@ -26,7 +26,6 @@ context = zmq.Context()
 
 socket  = context.socket(zmq.PUB)
 socket.bind(f"tcp://{args.subIp}:{args.subPort}")
-
 
 
 
@@ -43,9 +42,25 @@ class EmotionDetector():
         self.net = self.net.half()
         self.net.eval()
 
+        self.face  = None
+        self.thread = None
 
+        self.val         = None
+        self.ar          = None
+        self.expr        = None
+        self.expressions = None
 
     def get_emotions(self, face):
+        
+        if(self.thread is None or not self.thread.is_alive()):
+            self.face = face
+            thread = Thread(target=self.get_emotions_thread)
+            thread.start()
+
+        return (self.val, self.ar, self.expr, self.expressions)
+
+    def get_emotions_thread(self):
+        face = self.face
         data          = torch.tensor(face, dtype=torch.float16) / 255
         data          = data.permute(2, 0, 1).unsqueeze(0)
 
@@ -68,17 +83,34 @@ class EmotionDetector():
         for i, emotion in _expressions.items():
             expressions[emotion] = float(expression_logits[0, i])
 
-
-
-        return val, ar, expr, expressions
+        self.val  = val
+        self.ar   = ar
+        self.expr = expr
+        self.expressions = expressions
 
 class FaceExtractor:
 
     def __init__(self, cascPath):
         self.faceCascade   = cv2.CascadeClassifier(cascPath)
+        self.frame  = None
+        self.thread = None
+        self.face   = None
+        self.box    = (0.0, 0.0, 0.0, 0.0)
 
+    def ready(self):
+        pass
 
     def get_face(self, frame):
+        self.frame = frame
+
+        if(self.thread is None or not self.thread.is_alive()):
+            thread = Thread(target=self.get_face_thread)
+            thread.start()
+
+        return self.face, self.box
+    
+    def get_face_thread(self):
+        frame = self.frame
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self.faceCascade.detectMultiScale(
             gray,
@@ -103,18 +135,17 @@ class FaceExtractor:
             (x, y, w, h) = faces[frame_i]
             face =  frame[y:y+h, x:x+w]
 
-            return face, (x, y, w, h)
+            self.face = face
+            self.box  = (x, y, w, h)
 
-        else:
-            return None, (0, 0, 0, 0)
+
 
 def main():
     inference_device = 'cuda:0'
     image_size = 256
-    video_device = 0
 
     cascPath      = str(Path(args.cascPath).absolute())
-    video_capture = cv2.VideoCapture(video_device)
+    video_capture = cv2.VideoCapture(args.device)
 
     faceExtractor = FaceExtractor(cascPath)
 
@@ -131,21 +162,19 @@ def main():
             if frame is not None:
                 face, (x, y, w, h) = faceExtractor.get_face(frame)
 
-
-
                 if face is not None:
                     t1 = time.time()
                     face  = cv2.cvtColor(face , cv2.COLOR_BGR2RGB)
                     face  = cv2.resize(face, (image_size, image_size))
 
-
                     (val, ar, expr, expressions) = emotionDetector.get_emotions(face)
+
                     t2 = time.time()
 
                     json_data = {
-                        "valance"    : float(val),
-                        "arousal"    : float(ar),
-                        "expression" : expr,
+                        "valance"    : float(val) if val  else 0.0,
+                        "arousal"    : float(ar)  if ar   else 0.0,
+                        "expression" : expr       if expr else None,
                         "logits"     : expressions,
                         "box" : {
                             "x" : int(x),   
