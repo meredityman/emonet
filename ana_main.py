@@ -54,8 +54,8 @@ class EmotionDetector():
         
         if(self.thread is None or not self.thread.is_alive()):
             self.face = face
-            thread = Thread(target=self.get_emotions_thread)
-            thread.start()
+            self.thread = Thread(target=self.get_emotions_thread)
+            self.thread.start()
 
         return (self.val, self.ar, self.expr, self.expressions)
 
@@ -92,6 +92,8 @@ class FaceExtractor:
 
     def __init__(self, cascPath):
         self.faceCascade   = cv2.CascadeClassifier(cascPath)
+        self.face = None
+        self.box = (0.0,0.0,0.0,0.0)
 
     def ready(self):
         pass
@@ -115,15 +117,18 @@ class FaceExtractor:
         )
 
         if len(faces) >= 1:
+            if len(faces) > 1: 
+                print(f"Warning: Multpile faces")
 
             center_offset = []
             for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                # cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
                 centroid = np.array([x + w * 0.5, y + h * 0.5])
-                offset = centroid - (np.array(frame.shape[:2]) * 0.5)
+                offset = (np.array(frame.shape[:2]) * 0.5) - centroid
                 offset = np.linalg.norm(offset)
                 center_offset.append( offset )
 
+            # print(center_offset)
             frame_i = np.argmin(np.array(center_offset))
 
             (x, y, w, h) = faces[frame_i]
@@ -137,9 +142,24 @@ class FaceExtractor:
 def main():
     inference_device = 'cuda:0'
     image_size = 256
+    
 
     cascPath      = str(Path(args.cascPath).absolute())
-    video_capture = cv2.VideoCapture(args.device)
+    video_capture = cv2.VideoCapture(args.device, cv2.CAP_V4L2)
+    """ 
+    # How to set video capture properties using V4L2:
+    # Full list of Video Capture Properties for OpenCV: https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
+    #Select Pixel Format:
+    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'YUYV'))
+    # Two common formats, MJPG and H264
+    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+    # Default libopencv on the Jetson is not linked against libx264, so H.264 is not available
+    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
+    # Select frame size, FPS:
+    video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    video_capture.set(cv2.CAP_PROP_FPS, 30)
+    """
 
     faceExtractor = FaceExtractor(cascPath)
 
@@ -155,14 +175,13 @@ def main():
 
             if frame is not None:
                 face, (x, y, w, h) = faceExtractor.get_face(frame)
+                t1 = time.time()
 
                 if face is not None:
-                    t1 = time.time()
-                    face  = cv2.cvtColor(face , cv2.COLOR_BGR2RGB)
+                    # face  = cv2.cvtColor(face , cv2.COLOR_BGR2RGB)
                     face  = cv2.resize(face, (image_size, image_size))
 
                     (val, ar, expr, expressions) = emotionDetector.get_emotions(face)
-
                     t2 = time.time()
 
                     json_data = {
@@ -178,7 +197,7 @@ def main():
                         },
                         "resolution" : {
                             "x" : int(frame.shape[1]),
-                            "y" : int(frame.shape[2])
+                            "y" : int(frame.shape[0])
                         }
                     }
 
@@ -186,12 +205,12 @@ def main():
                     socket.send_string(json.dumps(json_data), 0)
                     t3 = time.time()
 
-                    print(f"fps: {1/(t3-t0):02f} cv: {t1-t0:02f} | emonet: {t2-t1:02f} | zmq: {t3-t2:02f}")
+                    print(f"fps: {1/(t3-t0):02f} cv: {t1-t0:02f} | emonet: {t2-t1:02f} | zmq: {t3-t2:02f}  | exp: {expr}")
 
 
-                    # cv2.imshow('face', face)
-                    # if cv2.waitKey(25) & 0xFF == ord('q'):
-                    #     break
+                    cv2.imshow('face', face)
+                    if cv2.waitKey(25) & 0xFF == ord('q'):
+                        break
 
             else:
                 print(f"No camera frame!")
