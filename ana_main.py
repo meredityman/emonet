@@ -10,11 +10,12 @@ import json
 import time
 from emonet.models import EmoNet
 
-_expressions = {0: 'neutral', 1:'happy', 2:'sad', 3:'surprise', 4:'fear', 5:'disgust', 6:'anger', 7:'contempt'}
+
+
 
 #Parse arguments
 parser = argparse.ArgumentParser()
-parser.add_argument('--nclasses', type=int, default=8, choices=[5,8], help='Number of emotional classes to test the model on. Please use 5 or 8.')
+parser.add_argument('--nclasses', type=int, default=5, choices=[5,8], help='Number of emotional classes to test the model on. Please use 5 or 8.')
 parser.add_argument('--cascPath', default="haarcascade_frontalface_default.xml")
 parser.add_argument('--device'  , type=int, default=0)
 parser.add_argument('--subIp'   , default="127.0.0.1")
@@ -27,7 +28,10 @@ context = zmq.Context()
 socket  = context.socket(zmq.PUB)
 socket.bind(f"tcp://{args.subIp}:{args.subPort}")
 
-
+if args.nclasses == 8:
+    _expressions = {0: 'neutral', 1:'happy', 2:'sad', 3:'surprise', 4:'fear', 5:'disgust', 6:'anger', 7:'contempt'}
+elif args.nclasses == 5: 
+    _expressions = {0: 'neutral', 1:'happy', 2:'sad', 3:'surprise', 4:'fear'}
 
 class EmotionDetector():
 
@@ -69,7 +73,9 @@ class EmotionDetector():
             out = self.net(images)
 
         expression_logits = out['expression'].cpu().numpy()
-        expr_i = int(np.argmax(expression_logits, axis=1).squeeze())
+        expression_logits =   (expression_logits / np.sqrt(np.sum(expression_logits**2)))
+        expression_logits = np.clip(0.5 *  (expression_logits + 1.0), 0.0, 1.0)
+        expr_i = int(np.argmax(expression_logits, axis=1).squeeze())    
 
         val = out['valence']
         val = np.squeeze(val.cpu().numpy())
@@ -110,7 +116,7 @@ class FaceExtractor:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self.faceCascade.detectMultiScale(
             gray,
-            scaleFactor=1.1,
+            scaleFactor=1.5,
             minNeighbors=5,
             minSize=(100, 100),
             flags=cv2.CASCADE_SCALE_IMAGE
@@ -146,24 +152,11 @@ def main():
 
     cascPath      = str(Path(args.cascPath).absolute())
     video_capture = cv2.VideoCapture(args.device, cv2.CAP_V4L2)
-    """ 
-    # How to set video capture properties using V4L2:
-    # Full list of Video Capture Properties for OpenCV: https://docs.opencv.org/3.4/d4/d15/group__videoio__flags__base.html
-    #Select Pixel Format:
-    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'YUYV'))
-    # Two common formats, MJPG and H264
-    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-    # Default libopencv on the Jetson is not linked against libx264, so H.264 is not available
-    # video_capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
-    # Select frame size, FPS:
-    video_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    video_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    video_capture.set(cv2.CAP_PROP_FPS, 30)
-    """
+
 
     faceExtractor = FaceExtractor(cascPath)
 
-    emotionDetector = EmotionDetector(device=inference_device, n_expression=8)
+    emotionDetector = EmotionDetector(device=inference_device, n_expression=args.nclasses)
 
 
     t0 = time.time()
@@ -188,6 +181,7 @@ def main():
                         "valance"    : float(val) if val  else 0.0,
                         "arousal"    : float(ar)  if ar   else 0.0,
                         "expression" : expr       if expr else None,
+                        "expression-probability" : expressions[expr] if expr else None,
                         "logits"     : expressions,
                         "box" : {
                             "x" : int(x),   
@@ -198,7 +192,7 @@ def main():
                         "resolution" : {
                             "x" : int(frame.shape[1]),
                             "y" : int(frame.shape[0])
-                        }
+                        },
                     }
 
                     socket.send_string("ANA_Face", zmq.SNDMORE)
