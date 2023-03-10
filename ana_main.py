@@ -40,7 +40,7 @@ class FaceExtractor:
         print("Initialising face extractor")
         self.faceCascade   = cv2.CascadeClassifier(cascPath)
         self.face = None
-        self.box = (0.0,0.0,0.0,0.0)
+        self.box = None
 
     def ready(self):
         pass
@@ -56,7 +56,7 @@ class FaceExtractor:
         faces = self.faceCascade.detectMultiScale(
             gray,
             scaleFactor=1.5,
-            minNeighbors=5,
+            minNeighbors=6,
             minSize=(100, 100),
             flags=cv2.CASCADE_SCALE_IMAGE
         )
@@ -65,16 +65,20 @@ class FaceExtractor:
             if len(faces) > 1: 
                 print(f"Warning: Multpile faces")
 
-            center_offset = []
-            for (x, y, w, h) in faces:
-                # cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                centroid = np.array([x + w * 0.5, y + h * 0.5])
-                offset = (np.array(frame.shape[:2]) * 0.5) - centroid
-                offset = np.linalg.norm(offset)
-                center_offset.append( offset )
+            metric = []
+            for face in faces:
+                if(self.box == None):
+                    # cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    (x, y, w, h) = face
+                    centroid = np.array([x + w * 0.5, y + h * 0.5])
+                    offset = (np.array(frame.shape[:2]) * 0.5) - centroid
+                    offset = np.linalg.norm(offset)
+                    metric.append( offset )
+                else:
+                    offset = np.linalg.norm(np.array(face) - np.array(self.box))
+                    metric.append( offset )
 
-            # print(center_offset)
-            frame_i = np.argmin(np.array(center_offset))
+            frame_i = np.argmin(np.array(metric))
 
             (x, y, w, h) = faces[frame_i]
             face =  frame[y:y+h, x:x+w]
@@ -181,7 +185,7 @@ def main():
                         "valance"    : float(val) if val  else 0.0,
                         "arousal"    : float(ar)  if ar   else 0.0,
                         "expression" : expr       if expr else None,
-                        "expression-probability" : expressions[expr] if 100.0 * expr else None,
+                        "expression-probability" : 100.0 * expressions[expr] if expr else None,
                         "logits"     : expressions,
                         "box" : {
                             "x" : int(x),   
