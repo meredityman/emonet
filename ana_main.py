@@ -171,7 +171,8 @@ def main():
             ret, frame = video_capture.read()
 
             if frame is not None:
-                face, (x, y, w, h), newFace = faceExtractor.get_face(frame)
+                face, box, newFace = faceExtractor.get_face(frame)
+                
                 t1 = time.time()
 
                 if face is not None and newFace:
@@ -180,7 +181,7 @@ def main():
 
                     (val, ar, expr, expressions) = emotionDetector.get_emotions(face)
                     t2 = time.time()
-
+                    (x, y, w, h) = box
                     json_data = {
                         "valance"    : float(val) if val  else 0.0,
                         "arousal"    : float(ar)  if ar   else 0.0,
